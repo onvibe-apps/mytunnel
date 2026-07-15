@@ -76,7 +76,10 @@ const text = (body: string, status: number) =>
 async function handlePoll(req: Request): Promise<Response> {
   if (!authed(req)) return text("unauthorized", 401);
 
-  await pool.query("UPDATE tunnel_meta SET last_poll_at = now() WHERE id = 1");
+  // Upsert so a freshly forked relay (schema copied, data not) works out of the box.
+  await pool.query(
+    "INSERT INTO tunnel_meta (id, last_poll_at) VALUES (1, now()) ON CONFLICT (id) DO UPDATE SET last_poll_at = now()",
+  );
   // Backstop cleanup of anything abandoned (client died mid-flight, etc.).
   await pool.query("DELETE FROM tunnel_requests WHERE created_at < now() - interval '2 minutes'");
 
