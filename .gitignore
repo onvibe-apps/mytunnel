@@ -1,0 +1,6 @@
+/mytunnel
+/dist/
+app/.onvibe/
+app/.onvibe-dev/
+.playwright-mcp/
+*.png

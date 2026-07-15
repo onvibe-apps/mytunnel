@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tunnel inspector</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #fff; --border: #e4e7ec; --text: #1f2430;
+    --muted: #6b7280; --accent: #4f46e5; --row-hover: #f0f1f4; --row-sel: #eef0fe;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1b1e24; --border: #2b2f38; --text: #e6e8ec;
+      --muted: #9aa1ad; --accent: #8b85f5; --row-hover: #23272f; --row-sel: #2a2e46;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color: var(--text); background: var(--bg); display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  header .brand { font-weight: 700; letter-spacing: .3px; }
+  header .field { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  header .field b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+  .badge-conn { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa1ad; }
+  .dot.on { background: #16a34a; }
+  button {
+    font: inherit; padding: 4px 10px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); border-radius: 6px; cursor: pointer;
+  }
+  button:hover { background: var(--row-hover); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .spacer { flex: 1; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .list { width: 46%; min-width: 320px; border-right: 1px solid var(--border);
+          display: flex; flex-direction: column; background: var(--panel); }
+  .list .filter { padding: 8px; border-bottom: 1px solid var(--border); }
+  .list .filter input {
+    width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--text);
+  }
+  .rows { overflow-y: auto; flex: 1; }
+  .row {
+    display: grid; grid-template-columns: 88px 54px 1fr 46px 60px 62px;
+    gap: 10px; align-items: center; padding: 7px 10px; cursor: pointer;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .row .time { overflow: hidden; text-overflow: ellipsis; }
+  .row:hover { background: var(--row-hover); }
+  .row.sel { background: var(--row-sel); }
+  .row .time { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .row .path { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+  .row .dur, .row .size { color: var(--muted); text-align: right; font-family: var(--mono); font-size: 11px; }
+  .method { font-weight: 700; font-size: 11px; font-family: var(--mono); }
+  .m-GET { color: #16a34a; } .m-POST { color: #2563eb; } .m-PUT { color: #d97706; }
+  .m-DELETE { color: #dc2626; } .m-PATCH { color: #7c3aed; } .m-HEAD, .m-OPTIONS { color: var(--muted); }
+  .status { font-family: var(--mono); font-weight: 600; text-align: right; }
+  .s2 { color: #16a34a; } .s3 { color: #0891b2; } .s4 { color: #d97706; } .s5 { color: #dc2626; }
+  .replay-tag { display: inline-block; margin-left: 6px; font-size: 9px; padding: 1px 4px;
+                border-radius: 4px; background: var(--accent); color: #fff; vertical-align: middle; }
+  .spin { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent);
+          border-radius: 50%; display: inline-block; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .detail { flex: 1; overflow-y: auto; padding: 16px; }
+  .detail .empty { color: var(--muted); text-align: center; margin-top: 60px; }
+  .detail h2 { font-size: 13px; margin: 18px 0 8px; text-transform: uppercase;
+               letter-spacing: .5px; color: var(--muted); }
+  .detail .title { font-family: var(--mono); font-size: 14px; word-break: break-all; }
+  .detail .actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+  table.headers { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  table.headers td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.headers td.k { color: var(--muted); white-space: nowrap; width: 1%; }
+  table.headers td.v { word-break: break-all; }
+  pre.body {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; overflow-x: auto; font-family: var(--mono); font-size: 12px;
+    white-space: pre-wrap; word-break: break-word; max-height: 420px;
+  }
+  .note { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  a.dl { color: var(--accent); }
+  .pill { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 9px;
+          background: #dc2626; color: #fff; font-size: 11px; text-align: center; }
+
+  /* Access modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none;
+             align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 10; overflow-y: auto; }
+  .overlay.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+           width: 100%; max-width: 720px; padding: 20px; }
+  .modal header { background: none; border: none; padding: 0 0 12px; }
+  .modal h1 { font-size: 16px; margin: 0; }
+  .modal h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 18px 0 8px; }
+  .modal table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .modal th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  .modal td { padding: 5px 6px; border-bottom: 1px solid var(--border); font-family: var(--mono); vertical-align: middle; }
+  .modal td.actions { text-align: right; font-family: inherit; }
+  .modal .form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .modal .form input[type=text], .modal .form input[type=number] {
+    padding: 5px 7px; font: inherit; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); }
+  .modal .form label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  .modal .close { float: right; }
+  .tag-perm { color: #16a34a; } .tag-temp { color: var(--muted); }
+  .label-edit { width: 100%; padding: 3px 6px; font: inherit; font-family: var(--mono);
+    border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); }
+  .label-edit:hover { border-color: var(--border); }
+  .label-edit:focus { border-color: var(--accent); background: var(--bg); outline: none; }
+  .empty-mini { color: var(--muted); font-size: 12px; padding: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">tunnel inspector</span>
+  <span class="field">public <b id="pub">–</b> <button id="copyPub" title="Copy public URL">copy</button></span>
+  <span class="field">local <b id="loc">–</b></span>
+  <span class="badge-conn"><span class="dot" id="dot"></span><span id="connText" class="field">offline</span></span>
+  <span class="spacer"></span>
+  <button id="access">Access <span id="deniedCount" class="pill" hidden>0</span></button>
+  <button id="clear">Clear</button>
+</header>
+<main>
+  <section class="list">
+    <div class="filter"><input id="filter" placeholder="filter · method, path or status"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+  <section class="detail" id="detail"><div class="empty">Select a request to inspect it.</div></section>
+</main>
+
+<div class="overlay" id="accessOverlay">
+  <div class="modal">
+    <button class="close" id="accessClose">✕</button>
+    <header><h1>Access control</h1></header>
+    <p class="note">Your IP as the relay sees it: <b id="whoami">…</b>
+      <button id="allowMe" style="margin-left:6px">Allow my IP</button></p>
+
+    <h2>Allowed IPs</h2>
+    <table id="allowedTable"><thead><tr><th>IP</th><th>Label</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="form">
+      <input type="text" id="newIp" placeholder="IP (blank = your current)">
+      <input type="text" id="newLabel" placeholder="label (e.g. stripe webhook)">
+      <label><input type="checkbox" id="newPerm"> permanent</label>
+      <input type="number" id="newTtl" value="3600" min="30" title="ttl seconds (if not permanent)" style="width:90px">
+      <button class="primary" id="addIp">Add</button>
+    </div>
+
+    <h2>Denied requests <span class="note" id="allowlistState"></span></h2>
+    <table id="deniedTable"><thead><tr><th>Time</th><th>IP</th><th>Request</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token");
+const q = (p) => TOKEN ? p + (p.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN) : p;
+
+const state = { items: new Map(), order: [], selected: null, filter: "" };
+const $ = (id) => document.getElementById(id);
+
+// ── base64 helpers ──────────────────────────────────────────────────────────
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a;
+}
+function fmtBytes(n) {
+  if (n == null) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+function statusClass(s) { return s ? "s" + String(s)[0] : ""; }
+
+// ── list rendering ──────────────────────────────────────────────────────────
+function matches(it) {
+  const f = state.filter.trim().toLowerCase();
+  if (!f) return true;
+  return (it.method + " " + it.path + " " + (it.status || "")).toLowerCase().includes(f);
+}
+function rowHTML(it) {
+  const t = new Date(it.at).toLocaleTimeString();
+  const full = new Date(it.at).toLocaleString();
+  let statusCell;
+  if (it.phase === "pending") statusCell = '<span class="spin"></span>';
+  else if (it.phase === "error") statusCell = '<span class="status s5">ERR</span>';
+  else statusCell = '<span class="status ' + statusClass(it.status) + '">' + (it.status || "") + '</span>';
+  const replayTag = it.replayOf ? '<span class="replay-tag">replay</span>' : '';
+  return '<div class="row' + (state.selected === it.id ? ' sel' : '') + '" data-id="' + it.id + '">'
+    + '<span class="time" title="' + escapeHTML(full) + '">' + t + '</span>'
+    + '<span class="method m-' + it.method + '">' + it.method + '</span>'
+    + '<span class="path">' + escapeHTML(it.path) + replayTag + '</span>'
+    + statusCell
+    + '<span class="dur">' + (it.durationMs != null ? it.durationMs + 'ms' : '') + '</span>'
+    + '<span class="size">' + (it.resBytes != null ? fmtBytes(it.resBytes) : '') + '</span>'
+    + '</div>';
+}
+function renderList() {
+  const rows = $("rows");
+  const visible = state.order.map((id) => state.items.get(id)).filter((it) => it && matches(it));
+  rows.innerHTML = visible.map(rowHTML).join("");
+}
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ── upsert from SSE / initial load ──────────────────────────────────────────
+function upsert(it, atTop) {
+  const existed = state.items.has(it.id);
+  state.items.set(it.id, it);
+  if (!existed) {
+    if (atTop) state.order.unshift(it.id); else state.order.push(it.id);
+  }
+  renderList();
+  if (state.selected === it.id) loadDetail(it.id);
+}
+
+// ── detail ──────────────────────────────────────────────────────────────────
+const TEXTUAL = /^(application\/json|text\/|application\/xml|application\/x-www-form-urlencoded|application\/javascript|application\/[a-z.+-]*\+json)/i;
+function ctOf(headers) {
+  if (!headers) return "";
+  for (const k in headers) if (k.toLowerCase() === "content-type") return headers[k];
+  return "";
+}
+function renderBody(b64, headers, truncated) {
+  if (b64 == null) return '<p class="note">no body</p>';
+  const bytes = b64ToBytes(b64);
+  const ct = ctOf(headers);
+  const isText = TEXTUAL.test(ct) || (!ct && bytes.length > 0);
+  const trunc = truncated ? '<p class="note">⚠ truncated to stored limit</p>' : '';
+  if (bytes.length > 256 * 1024) {
+    return trunc + '<p class="note">' + fmtBytes(bytes.length) + ' · too large to render · '
+      + '<a class="dl" download="body" href="data:application/octet-stream;base64,' + b64 + '">download</a></p>';
+  }
+  if (!isText) {
+    return trunc + '<p class="note">binary · ' + fmtBytes(bytes.length) + ' · '
+      + '<a class="dl" download="body" href="data:' + (ct || "application/octet-stream") + ';base64,' + b64 + '">download</a></p>';
+  }
+  let text = new TextDecoder("utf-8").decode(bytes);
+  if (/json/i.test(ct)) { try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {} }
+  return trunc + '<pre class="body">' + escapeHTML(text) + '</pre>';
+}
+function headersTable(headers) {
+  if (!headers || !Object.keys(headers).length) return '<p class="note">no headers</p>';
+  const rows = Object.keys(headers).sort().map((k) =>
+    '<tr><td class="k">' + escapeHTML(k) + '</td><td class="v">' + escapeHTML(headers[k]) + '</td></tr>').join("");
+  return '<table class="headers">' + rows + '</table>';
+}
+async function loadDetail(id) {
+  const res = await fetch(q("/api/requests/" + id));
+  if (!res.ok) { $("detail").innerHTML = '<div class="empty">Gone.</div>'; return; }
+  const d = await res.json();
+  const err = d.phase === "error" ? '<p class="note" style="color:#dc2626">error · ' + escapeHTML(d.error || "") + '</p>' : '';
+  const replayTag = d.replayOf ? '<span class="replay-tag">replay of ' + escapeHTML(d.replayOf) + '</span>' : '';
+  $("detail").innerHTML =
+    '<div class="title"><span class="method m-' + d.method + '">' + d.method + '</span> '
+      + escapeHTML(d.path) + ' ' + replayTag + '</div>'
+    + '<div class="actions">'
+      + '<button class="primary" id="btnReplay">Replay</button>'
+      + '<button id="btnCurl">Copy as cURL</button>'
+      + '<button id="btnCopyReq">Copy req body</button>'
+      + '<button id="btnCopyRes">Copy res body</button>'
+    + '</div>'
+    + err
+    + '<h2>Request</h2>' + headersTable(d.reqHeaders)
+      + renderBody(d.reqBody, d.reqHeaders, d.reqTruncated)
+    + '<h2>Response ' + (d.status ? '· ' + d.status : '') + (d.durationMs != null ? ' · ' + d.durationMs + 'ms' : '') + '</h2>'
+      + headersTable(d.resHeaders) + renderBody(d.resBody, d.resHeaders, d.truncated);
+
+  $("btnReplay").onclick = () => replay(id);
+  $("btnCurl").onclick = () => copyCurl(d);
+  $("btnCopyReq").onclick = () => copyBody(d.reqBody, d.reqHeaders);
+  $("btnCopyRes").onclick = () => copyBody(d.resBody, d.resHeaders);
+}
+function bodyToText(b64, headers) {
+  if (b64 == null) return "";
+  const bytes = b64ToBytes(b64);
+  return TEXTUAL.test(ctOf(headers)) ? new TextDecoder("utf-8").decode(bytes) : "[binary]";
+}
+function copyBody(b64, headers) { navigator.clipboard.writeText(bodyToText(b64, headers)); }
+function copyCurl(d) {
+  const base = $("pub").textContent.replace(/\/$/, "");
+  let c = "curl -X " + d.method + " '" + base + d.path + "'";
+  if (d.reqHeaders) for (const k in d.reqHeaders) c += " \\\n  -H '" + k + ": " + d.reqHeaders[k].replace(/'/g, "'\\''") + "'";
+  const body = bodyToText(d.reqBody, d.reqHeaders);
+  if (body && body !== "[binary]") c += " \\\n  --data-raw '" + body.replace(/'/g, "'\\''") + "'";
+  navigator.clipboard.writeText(c);
+}
+async function replay(id) {
+  const res = await fetch(q("/api/requests/" + id + "/replay"), { method: "POST" });
+  if (res.ok) { const { id: newId } = await res.json(); state.selected = newId; }
+}
+
+// ── events ──────────────────────────────────────────────────────────────────
+$("rows").addEventListener("click", (e) => {
+  const row = e.target.closest(".row");
+  if (!row) return;
+  state.selected = row.dataset.id;
+  renderList();
+  loadDetail(state.selected);
+});
+$("filter").addEventListener("input", (e) => { state.filter = e.target.value; renderList(); });
+$("clear").onclick = async () => {
+  await fetch(q("/api/clear"), { method: "POST" });
+  state.items.clear(); state.order = []; state.selected = null;
+  renderList(); $("detail").innerHTML = '<div class="empty">Select a request to inspect it.</div>';
+};
+$("copyPub").onclick = () => navigator.clipboard.writeText($("pub").textContent);
+
+// ── state + resync + SSE ────────────────────────────────────────────────────
+async function loadState() {
+  try {
+    const s = await (await fetch(q("/api/state"))).json();
+    $("pub").textContent = s.publicUrl || "–";
+    $("loc").textContent = s.localTarget || "–";
+    const on = s.online === true;
+    $("dot").className = "dot" + (on ? " on" : "");
+    $("connText").textContent = on ? "online" + (s.pending ? " · " + s.pending + " pending" : "") : "offline";
+  } catch (_) {}
+}
+async function resync() {
+  const items = await (await fetch(q("/api/requests?limit=500"))).json();
+  state.items.clear(); state.order = [];
+  for (const it of items) { state.items.set(it.id, it); state.order.push(it.id); }
+  renderList();
+}
+function connectSSE() {
+  const es = new EventSource(q("/api/stream"));
+  es.addEventListener("new", (e) => upsert(JSON.parse(e.data), true));
+  es.addEventListener("update", (e) => upsert(JSON.parse(e.data), false));
+  es.addEventListener("cleared", () => {
+    state.items.clear(); state.order = []; renderList();
+  });
+  es.onopen = () => resync();          // resync on (re)connect; may have missed events
+  es.onerror = () => {};                // EventSource auto-reconnects
+}
+
+// ── Access control modal ────────────────────────────────────────────────────
+function fmtExpiry(e) {
+  if (e.permanent) return '<span class="tag-perm">permanent</span>';
+  if (!e.expires_at) return '<span class="tag-temp">—</span>';
+  const ms = new Date(e.expires_at).getTime() - Date.now();
+  if (ms <= 0) return '<span class="tag-temp">expired</span>';
+  const m = Math.round(ms / 60000);
+  return '<span class="tag-temp">' + (m >= 1 ? m + 'm' : Math.round(ms / 1000) + 's') + ' left</span>';
+}
+async function loadAccess() {
+  try {
+    const who = await (await fetch(q("/api/whoami"))).json();
+    $("whoami").textContent = who.ip || "unknown";
+  } catch (_) { $("whoami").textContent = "unavailable"; }
+
+  const allowed = (await (await fetch(q("/api/allowed"))).json()).allowed || [];
+  $("allowedTable").querySelector("tbody").innerHTML = allowed.length
+    ? allowed.map((e) =>
+        '<tr><td>' + escapeHTML(e.ip) + '</td>'
+        + '<td><input class="label-edit" data-ip="' + escapeHTML(e.ip) + '" data-perm="' + (e.permanent ? '1' : '0')
+        + '" value="' + escapeHTML(e.label || '') + '" placeholder="label" title="Enter to save"></td>'
+        + '<td>' + fmtExpiry(e) + '</td>'
+        + '<td class="actions"><button data-rm="' + escapeHTML(e.ip) + '">remove</button></td></tr>').join("")
+    : '<tr><td colspan="4" class="empty-mini">No IPs allowed yet.</td></tr>';
+
+  const dj = await (await fetch(q("/api/denied"))).json();
+  const denied = dj.denied || [];
+  $("allowlistState").textContent = dj.allowlist === false ? "(allowlist OFF — all IPs served)" : "";
+  $("deniedTable").querySelector("tbody").innerHTML = denied.length
+    ? denied.map((d) =>
+        '<tr><td>' + new Date(d.at).toLocaleTimeString() + '</td><td>' + escapeHTML(d.ip)
+        + '</td><td>' + escapeHTML(d.method + ' ' + d.path) + '</td>'
+        + '<td class="actions"><button data-allow="' + escapeHTML(d.ip) + '">allow</button></td></tr>').join("")
+    : '<tr><td colspan="4" class="empty-mini">No denied requests.</td></tr>';
+  updateDeniedBadge(denied.length);
+}
+function updateDeniedBadge(n) {
+  const b = $("deniedCount");
+  if (n > 0) { b.textContent = n; b.hidden = false; } else { b.hidden = true; }
+}
+async function addAllowed(ip, label, permanent, ttl) {
+  await fetch(q("/api/allowed"), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ip: ip || undefined, label: label || undefined, permanent, ttl_seconds: ttl }),
+  });
+  loadAccess();
+}
+async function removeAllowed(ip) {
+  await fetch(q("/api/allowed"), {
+    method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ ip }),
+  });
+  loadAccess();
+}
+$("access").onclick = () => { $("accessOverlay").classList.add("open"); loadAccess(); };
+$("accessClose").onclick = () => $("accessOverlay").classList.remove("open");
+$("accessOverlay").addEventListener("click", (e) => { if (e.target === $("accessOverlay")) $("accessOverlay").classList.remove("open"); });
+$("allowMe").onclick = () => addAllowed(null, "my browser", false, Number($("newTtl").value) || 3600);
+$("addIp").onclick = () =>
+  addAllowed($("newIp").value.trim(), $("newLabel").value.trim(), $("newPerm").checked, Number($("newTtl").value) || 3600);
+document.addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-rm]"); if (rm) removeAllowed(rm.dataset.rm);
+  const al = e.target.closest("[data-allow]"); if (al) addAllowed(al.dataset.allow, "from denied", false, Number($("newTtl").value) || 3600);
+});
+// Inline label editing: Enter or blur saves, keeping the entry's permanent flag.
+function saveLabel(inp) {
+  const ip = inp.dataset.ip, perm = inp.dataset.perm === "1";
+  addAllowed(ip, inp.value.trim(), perm, Number($("newTtl").value) || 3600);
+}
+document.addEventListener("keydown", (e) => {
+  if (e.target.classList.contains("label-edit") && e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+});
+document.addEventListener("focusout", (e) => {
+  if (e.target.classList && e.target.classList.contains("label-edit")) saveLabel(e.target);
+});
+async function pollDenied() {
+  try {
+    const dj = await (await fetch(q("/api/denied"))).json();
+    updateDeniedBadge((dj.denied || []).length);
+  } catch (_) {}
+}
+
+loadState();
+resync();
+connectSSE();
+setInterval(loadState, 5000);
+pollDenied();
+setInterval(pollDenied, 8000);
+</script>
+</body>
+</html>
